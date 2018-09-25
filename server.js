@@ -1,8 +1,8 @@
 'use strict';
 
-// Imports dependencies and set up http server
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
-const APIAI_TOKEN = process.env.APIAI_TOKEN;
+const CLIENT_ACCESS_TOKEN = process.env.APIAI_TOKEN;
 const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
 
 const
@@ -11,7 +11,7 @@ const
     bodyParser = require('body-parser'),
     apiai = require('apiai');
 
-const apiaiApp = apiai(APIAI_TOKEN);
+const apiaiApp = apiai(CLIENT_ACCESS_TOKEN);
 
 
 const app = express();
@@ -30,16 +30,10 @@ app.post('/webhook', (req, res) => {
     if (body.object === 'page') {
         body.entry.forEach(function (entry) {
             let webhook_event = entry.messaging[0];
-
-            // Get the sender PSID
-            let sender_psid = webhook_event.sender.id;
-
-      // Check if the event is a message or postback and
-      // pass the event to the appropriate handler function
-      if (webhook_event.message) {
-        handleMessage(sender_psid, webhook_event.message);
-      } 
-    });
+            if (webhook_event.message) {
+                handleMessage(webhook_event);
+            }
+        });
 
         res.status(200).send('EVENT_RECEIVED');
     } else {
@@ -52,7 +46,7 @@ app.post('/webhook', (req, res) => {
 // Adds support for GET requests to our webhook
 app.get('/webhook', (req, res) => {
 
-    let VERIFY_TOKEN = "a4Uac9a2e"
+ 
 
     // Parse the query params
     let mode = req.query['hub.mode'];
@@ -72,18 +66,16 @@ app.get('/webhook', (req, res) => {
 
 // Handles messages events
 function handleMessage(event) {
-
-
     let sender = event.sender.id;
     let text = event.message.text;
     let apiai = apiaiApp.textRequest(text, {
-        sessionId: 'tabby_cat'
-      });
+        sessionId: '5lPa5c80d'
+    });
 
-      apiai.on('response', (response) => {        
-        callSendAPI(sender, response);          
-      });
- 
+    apiai.on('response', (response) => {
+        callSendAPI(sender, response);
+    });
+
 
     apiai.on('error', (error) => {
         console.log(error);
@@ -93,19 +85,17 @@ function handleMessage(event) {
 }
 
 function callSendAPI(sender_psid, response) {
-    // Construct the message body
-    let aiText = response.result.fulfillment.speech;
- console.log(aiText);
-  
-   
+
+    let message = response.result.fulfillment.speech;
+
     // Send the HTTP request to the Messenger Platform
     request({
         "uri": "https://graph.facebook.com/v2.6/me/messages",
         "qs": { "access_token": PAGE_ACCESS_TOKEN },
         "method": "POST",
-        "json":   {  
-          recipient: {id: sender_psid},
-          message: {text: aiText}
+        "json": {
+            recipient: { id: sender_psid },
+            message: { text: message }
         }
     }, (err) => {
         if (!err) {
@@ -115,3 +105,33 @@ function callSendAPI(sender_psid, response) {
         }
     });
 }
+
+
+// Post method for calling openWeatherMap Current Weather API 
+app.post('/weather', (req, res) => {
+    if (req.body.queryResult.action === 'weather') {
+        let city = req.body.queryResult.parameters['geo-city'];
+        let restUrl = 'http://api.openweathermap.org/data/2.5/weather?q=' + city + '&APPID=' + WEATHER_API_KEY;
+        request.get(restUrl, (error, response, body) => {
+            if (!error && response.statusCode == 200) {
+                let json = JSON.parse(body);
+                let tempMinC = ~~(json.main.temp_min - 273.15);
+                let tempMaxC = ~~(json.main.temp_max - 273.15);
+                let message = 'Current weather in ' + json.name + ': ' + json.weather[0].description + '.\nThe temperature is from ' + tempMinC + ' to ' + tempMaxC + ' ℃.'
+                return res.json({
+                    fulfillmentText: message,
+                    source: "Weather"
+                });
+            } else {
+                let errorMessage = 'Error finding weather for requested city';
+                return res.status(400).json({
+                    status: {
+                        code: 400,
+                        errorType: errorMessage
+                    }
+                });
+            }
+        })
+    }
+
+});
